@@ -1,0 +1,425 @@
+/* todolist.c */
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+
+/***********************************ソート機能スイッチ***********************************/
+#define DATESORT 1 // sort()関数のスイッチ（0:off　1:on） 
+/**************************************************************************************/
+
+#define DB_S "schedule.db" // データベース（ローカルファイル）名前
+#define MAXNUM 99 // 予定を最大保存数
+#define FORMAT1 "%5s | %-80s | %-5s\n" // リスト表題のフォーマット
+#define FORMAT2 "%5d | %-80s | %c%c/%c%c\n" // リスト内容のフォーマット
+
+// 変数宣言
+char* schedule[MAXNUM][3]; // プログラムが実行時、データを一時保存するための配列
+int todoNum = 0; // 総予定数
+int deletedNum = 0; // 完成(削除)予定数
+int index[MAXNUM]; // 未完成予定のschedule添字記録用
+
+
+// 関数宣言
+void add(); //予定追加
+void mainPage(); // 予定一覧
+void complete(); // 完成一覧
+void save(); // 保存・終了
+void edit(int); // 編集
+int dateFormatCheck(char*); // 日付フォーマット判定
+void sort(); // (追加機能)ソート機能
+
+
+
+int main() {
+	/***********************************初期化***********************************/
+	
+	char todo[128]; // 予定内容
+	char deadline[8]; // 締め切り
+	char isDeleted[2]; // ロジック削除判別記号（0:未削除　1:削除）
+	char select[2]; // メニュー選択用
+
+	// DB_Sからデータを読み込み(r+)
+	FILE* fp_s;
+	fp_s = fopen(DB_S, "r+");
+	if (fp_s == NULL) {
+		// ファイルが存在しない場合、新たなファイルを作る。
+		// printf("no file but i will build a new one\n"); // test
+		fp_s = fopen(DB_S, "w");
+	}
+	else {
+		// printf("opened the file\n");  // test
+		// ファイルが正常に開きた場合、データをscheduleに格納。データ形式：内容 日付\n
+
+		while (fscanf(fp_s, "%s%s%s", todo, deadline, isDeleted) != EOF) {
+			// 予定を格納
+			schedule[todoNum][0] = (char*)malloc(strlen(todo) + 1); //メモリの動的確保,+1は'\0'のスペースを確保するため。
+			if (schedule[todoNum][0] == NULL) {
+				perror("メモリの確保が失敗した。\n");
+				return -1;
+			}
+			strcpy(schedule[todoNum][0], todo);
+
+			//　締切りを格納（12/01はschedule中1201の形で存在）
+			schedule[todoNum][1] = (char*)malloc(strlen(deadline) + 1);
+			if (schedule[todoNum][1] == NULL) {
+				perror("メモリの確保が失敗した。\n");
+				return -1;
+			}
+			strcpy(schedule[todoNum][1], deadline);
+
+			// 削除判定を格納  
+			schedule[todoNum][2] = (char*)malloc(1);
+			if (schedule[todoNum][2] == NULL) {
+				perror("メモリの確保が失敗した。\n");
+				return -1;
+			}
+			strcpy(schedule[todoNum][2], isDeleted);
+			if (strcmp(isDeleted, "1") == 0) { deletedNum++; }
+
+			// 総予定数+1
+			todoNum++;
+
+		}
+	}
+	fclose(fp_s);
+
+
+	// メニュー選択  
+	while (1) {
+		// 予定一覧画面
+		mainPage();
+		scanf("%s%*c", select);
+
+		switch (select[0])  // swithに代入するためselect(string)を整形(int/char)に変換
+		{
+		case 'a':add(); break;
+		case 'c':complete(); break;
+		case 'q':
+			if (DATESORT) {
+				// データを保存する前に、deadlineにてソートする
+				sort();
+			}
+			save();
+			exit(0);
+		default:
+			if (atoi(select) >0 && atoi(select) <= (todoNum - deletedNum)) {
+				edit(atoi(select));
+			}
+			else {
+				printf("    無効命令\n");
+			}
+			break;
+		}
+
+	}
+
+	return 0;
+}
+
+
+
+void mainPage() {
+	/***********************************予定一覧画面***********************************/
+	int num = 1; // 画面へ出力時の予定No.
+	
+	system("CLS"); // 画面をリセット
+	printf("\n\t\t\t\t\t～～予定一覧画面～～\n");
+	printf("\t\t\t\t\t\t\t\t\t\t\t未完成予定数:%d\n\n", todoNum - deletedNum); // test
+	// 表題出力
+	printf(FORMAT1, "No.", "予定内容", "締切り");
+	printf("----------------------------------------------------------------------------------------------------\n");
+
+	// 内容出力
+	for (int i = 0; i < todoNum; i++)
+	{
+		// 未削除項目のみ出力
+		if (strcmp(schedule[i][2], "0") == 0) {
+			printf(FORMAT2, num, schedule[i][0], schedule[i][1][0], schedule[i][1][1], schedule[i][1][2], schedule[i][1][3]);
+			index[num - 1] = i; // 未削除のschedule添字iをindexに記録
+			num++;
+		}
+	}
+
+	// メニュー
+	printf("====================================================================================================\n");
+	printf("　[メニュー]    a:予定追加   (No.)1～%d:予定編集    c:完成予定一覧    q:保存＆終了\n\n", (todoNum-deletedNum));
+	printf("　=>");
+}
+
+
+void add() {
+	/***********************************予定追加画面***********************************/
+	char newTodo[128];
+	char newDeadline[8];
+
+	system("CLS"); // 画面をリセット
+	printf("\n\t\t\t\t\t～～予定追加画面～～\n");
+
+	// 予定入力
+	printf("  予定内容\n");
+	printf("=>");
+	scanf("%s%*c", newTodo);
+
+	schedule[todoNum][0] = (char*)malloc(strlen(newTodo) + 1); //メモリの動的確保,+1は'\0'のスペースを確保するため。
+	if (schedule[todoNum][0] == NULL) {
+		perror("メモリの確保が失敗した。\n");
+		return -1;
+	}
+	else {
+		strcpy(schedule[todoNum][0], newTodo); // 予定を配列scheduleに格納
+	}
+
+	do
+	{
+		//締切り入力
+		printf("\n  締切り[xx/xx]");
+		printf("\n  (無しの場合[--/--]と入力)\n");
+		printf("=>");
+		scanf("%s%*c", newDeadline);
+	} while (!dateFormatCheck(newDeadline)); // 書式判定
+
+
+	//格納書式12/01=>1201
+	newDeadline[2] = newDeadline[3];
+	newDeadline[3] = newDeadline[4];
+	newDeadline[4] = '\0';
+
+	schedule[todoNum][1] = (char*)malloc(5);
+	if (schedule[todoNum][1] == NULL) {
+		perror("メモリの確保が失敗した。\n");
+		return -1;
+	}
+	else {
+		strcpy(schedule[todoNum][1], newDeadline); // 予定をscheduleに格納。
+	}
+
+
+	// 削除判定自動追加
+	schedule[todoNum][2] = (char*)malloc(2);
+	if (schedule[todoNum][2] == NULL) {
+		perror("メモリの確保が失敗した。\n");
+		return -1;
+	}
+	else {
+		strcpy(schedule[todoNum][2], "0");
+	}
+
+	printf("\n\t\t\t\t\t確認(Enter)");
+	getchar();
+
+
+	// 予定数+1
+	todoNum++;
+}
+
+
+void edit(int num) {
+	/***********************************予定編集画面***********************************/
+	char select[2];
+	char newDeadline[8];
+
+	int i = index[num-1]; // iはscheduleの添字、画面上の予定No.から導き出す
+
+	system("CLS"); // 画面をリセット
+	printf("\n\t\t\t\t\t～～予定編集画面～～\n");
+	printf(FORMAT1, "No.", "予定内容", "締切り");
+	for (int i = 0; i < 100; i++) {
+		printf("-");
+	}
+	printf("\n");
+	printf(FORMAT2, num, schedule[i][0], schedule[i][1][0], schedule[i][1][1], schedule[i][1][2], schedule[i][1][3]);
+	for (int i = 0; i < 100; i++) {
+		printf("=");
+	}
+	printf("\n");
+	printf("\n　[メニュー]    1:修正　　2:完成(削除)　　3:キャンセル\n");
+	while (1) {
+		printf("　=>");
+		scanf("%s%*c", select);
+		if (select[0] == '1') {
+			// 予定修正
+			printf("\n  予定内容\n");
+			printf("=>");
+			scanf("%s", schedule[i][0]);
+
+			//締切り入力
+			do {
+				printf("\n  締切り[xx/xx]");
+				printf("\n  (無しの場合[--/--]と入力)\n");
+				printf("=>");
+				scanf("%s%*c", newDeadline);
+			} while (!dateFormatCheck(newDeadline)); // 書式判定
+
+			//格納書式12/01=>1201
+			newDeadline[2] = newDeadline[3];
+			newDeadline[3] = newDeadline[4];
+			newDeadline[4] = '\0';
+
+			strcpy(schedule[i][1], newDeadline); // 予定をscheduleに格納。
+
+			printf("\n\t\t\t\t\t確認(Enter)");
+			getchar();
+			break;
+		}
+		else if (select[0] == '2') {
+			// 予定をロジック削除
+			strcpy(schedule[i][2], "1");
+
+			//　indexからschedule添字を削除
+			for (int i = num-1; i < todoNum - deletedNum; i++) {
+				index[i] = index[i + 1];
+			}
+
+			deletedNum++; // 完成数＋１
+			break;
+		}
+		else if (select[0] == '3') {
+			return 1;
+		}
+		else {
+			printf("    無効命令\n");
+		}
+	}
+}
+
+
+void complete() {
+	/***********************************完成予定一覧画面***********************************/
+	int num = 1; // 画面出力時の予定No.
+
+	system("CLS"); // 画面をリセット
+	printf("\n\t\t\t\t\t～～完成予定一覧画面～～\n");
+	printf("\t\t\t\t\t\t\t\t\t\t\t完成予定数:%d\n\n", deletedNum); // test
+	// 表題出力
+	printf(FORMAT1, "No.", "予定内容", "締切り");
+	printf("----------------------------------------------------------------------------------------------------\n");
+
+	// 内容出力
+	for (int i = 0; i < todoNum; i++)
+	{
+		// 未削除項目のみ出力
+		if (strcmp(schedule[i][2], "1") == 0) {
+			printf(FORMAT2, num, schedule[i][0], schedule[i][1][0], schedule[i][1][1], schedule[i][1][2], schedule[i][1][3]);
+			num++;
+		}
+	}
+
+	//　確認
+	printf("====================================================================================================\n");
+	printf("\n\t\t\t\t\t確認(Enter)");
+	getchar(); // 確認待ち
+
+}
+
+void save() {
+	/***********************************保存・終了***********************************/
+	FILE* fp_s;
+
+	fp_s = fopen(DB_S, "w");
+
+	if (fp_s != NULL) {
+
+		// データをDB_Sへ出力
+		for (int i = 0; i < todoNum; i++)
+		{
+			fprintf(fp_s, "%s %s %s ", schedule[i][0], schedule[i][1], schedule[i][2]);
+		}
+
+		// ファイルを閉じる
+		fclose(fp_s);
+
+		printf("\n\t\t\t  予定保存完了、プログラムが終了します。\n");
+	}
+	else {
+		perror("保存失敗！残念だね。");
+	}
+
+	printf("\n\t\t\t\t\t確認(Enter)");
+	getchar(); // 確認待ち
+	
+}
+
+
+void sort() {
+	/***********************************ソート***********************************/
+	char* temp[3]; // ソート用
+	
+	// 日付の[----]を[9999]へ変更
+	for (int i = 0; i < todoNum; i++)
+	{
+		if (strcmp(schedule[i][1], "----") == 0) {
+			strcpy(schedule[i][1], "9999");
+		}
+	}
+
+	// バブルソート
+	for (int i = todoNum-1; i > 0; i--) {
+		for (int j = 0; j < i; j++) {
+			if (atoi(schedule[j][1]) > atoi(schedule[j + 1][1])) {
+				temp[0] = schedule[j][0];
+				temp[1] = schedule[j][1];
+				temp[2] = schedule[j][2];
+
+				schedule[j][0] = schedule[j + 1][0];
+				schedule[j][1] = schedule[j + 1][1];
+				schedule[j][2] = schedule[j + 1][2];
+
+				schedule[j + 1][0] = temp[0];
+				schedule[j + 1][1] = temp[1];
+				schedule[j + 1][2] = temp[2];
+
+			}
+		}
+	}
+
+	// [9999]=>[----]
+	for (int i = 0; i < todoNum; i++)
+	{
+		if (strcmp(schedule[i][1], "9999") == 0) {
+			strcpy(schedule[i][1], "----");
+		}
+	}
+}
+
+
+int dateFormatCheck(char* dl) {
+	/***********************************日付フォーマット判定***********************************/
+	int flag = 1; // 判別用flag
+
+
+	//長さ判定
+	if (strlen(dl) != 5) { flag = 0; }
+
+	//月判定
+	// month :01 02 03 ... 10 11 12
+	if (dl[0] == '0') {
+		if (!(dl[1] > '0' && dl[1] <= '9')) { flag = 0; }
+	}
+	else if (dl[0] == '1') {
+		if (!(dl[1] >= '0' && dl[1] <= '2')) { flag = 0; }
+	}
+	else { flag = 0; }
+
+	//日判定
+	// date :01 02 03 ... 10 11 ..20..31
+	if (dl[3] == '0') {
+		if (!(dl[4] > '0' && dl[4] <= '9')) { flag = 0; }
+	}
+	else if (dl[3] == '1') {
+		if (!(dl[4] >= '0' && dl[4] <= '9')) { flag = 0; }
+	}
+	else if (dl[3] == '2') {
+		if (!(dl[4] >= '0' && dl[4] <= '9')) { flag = 0; }
+	}
+	else if (dl[3] == '3') {
+		if (!(dl[4] >= '0' && dl[4] <= '1')) { flag = 0; }
+	}
+	else { flag = 0; }
+
+	// --/--の場合check=1
+	if (dl[0] == '-' && dl[1] == '-' && dl[3] == '-' && dl[4] == '-') {
+		flag = 1;
+	}
+
+	return flag;
+}
